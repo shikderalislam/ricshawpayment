@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
 export default function RickshawPayTracker() {
   const DAILY_RATE = 250;
@@ -7,67 +7,73 @@ export default function RickshawPayTracker() {
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
 
-// Add a new payment
-const addPayment = async () => {
-  if (amount === "") return;
-  const newPayment = {
-    id: Date.now(),
-    name,
-    amount: parseFloat(amount),
-    reason,
-    date: new Date().toLocaleDateString(),
+  // Fetch payments from backend
+  useEffect(() => {
+    const fetchPayments = async () => {
+      try {
+        const res = await fetch("http://localhost:5000/payments");
+        const data = await res.json();
+        setPayments(data);
+      } catch (err) {
+        console.error("Error fetching payments:", err);
+      }
+    };
+    fetchPayments();
+  }, []);
+
+  // Add a new payment
+  const addPayment = async () => {
+    if (!amount) return;
+
+    const newPayment = {
+      id: Date.now(),
+      name,
+      amount: parseFloat(amount),
+      reason,
+      date: new Date().toISOString(),
+    };
+
+    // Optimistically update frontend
+    setPayments([newPayment, ...payments]);
+    setAmount("");
+    setReason("");
+
+    // Send to backend
+    try {
+      const res = await fetch("http://localhost:5000/payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newPayment),
+      });
+      const savedPayment = await res.json();
+      console.log("Saved payment:", savedPayment);
+    } catch (err) {
+      console.error("Error saving to backend:", err);
+    }
   };
-
-  // Update frontend state
-  setPayments([newPayment, ...payments]);
-  setAmount("");
-  setReason("");
-
-  // Send to Google Sheets backend
-  try {
-    await fetch("https://script.google.com/macros/s/AKfycbyPc53CGhq0v8jSdw72vXpHXo3LE5i7Od9wJ4gaOvN8JBz2oMtCjlYsBbTaRWSXGQCQ/exec", {
-      method: "POST",
-      body: JSON.stringify(newPayment),
-      headers: { "Content-Type": "application/json" },
-    });
-  } catch (err) {
-    console.error("Error saving to Google Sheets", err);
-  }
-};
-
 
   // Calculate total paid per person
-  const getTotal = (person) => {
-    return payments
+  const getTotal = (person) =>
+    payments
       .filter((p) => p.name === person)
       .reduce((sum, p) => sum + p.amount, 0);
-  };
 
   // Calculate total expected and due per person
   const getDue = (person) => {
-    const today = new Date();
-    const firstDay =
-      payments.length > 0
-        ? new Date(Math.min(...payments.map((p) => new Date(p.date))))
-        : today;
+    if (payments.length === 0) return 0;
+    const firstDay = new Date(
+      Math.min(...payments.map((p) => new Date(p.date)))
+    );
     const daysPassed =
-      Math.floor((today - firstDay) / (1000 * 60 * 60 * 24)) + 1;
+      Math.floor((new Date() - firstDay) / (1000 * 60 * 60 * 24)) + 1;
     const expected = daysPassed * DAILY_RATE;
     return expected - getTotal(person);
   };
 
   // Calculate missed days
   const getMissedDays = (person) => {
-    const today = new Date();
-    const firstDay =
-      payments.length > 0
-        ? new Date(Math.min(...payments.map((p) => new Date(p.date))))
-        : today;
-    const daysPassed =
-      Math.floor((today - firstDay) / (1000 * 60 * 60 * 24)) + 1;
-    const expected = daysPassed * DAILY_RATE;
-    const paid = getTotal(person);
-    return Math.max(0, Math.floor((expected - paid) / DAILY_RATE));
+    const due = getDue(person);
+    return Math.max(0, Math.floor(due / DAILY_RATE));
   };
 
   return (
@@ -141,7 +147,9 @@ const addPayment = async () => {
               <span>
                 {p.name} - ৳{p.amount}
               </span>
-              <span className="text-gray-500 text-sm">{p.date}</span>
+              <span className="text-gray-500 text-sm">
+                {new Date(p.date).toLocaleDateString()}
+              </span>
             </div>
             {p.reason && (
               <p className="text-sm text-gray-600">Reason: {p.reason}</p>
